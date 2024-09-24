@@ -25,53 +25,45 @@ class LowRankAttention(nn.Module):
         super().__init__()
         self.d_model = d_model
         self.n_heads = n_heads
-        self.rank = rank
         self.head_dim = d_model // n_heads
         
-        # Low-rank projections
-        self.q_linear = LowRankLinear(d_model, n_heads * self.head_dim, rank)
-        self.k_linear = LowRankLinear(d_model, n_heads * self.head_dim, rank)
-        self.v_linear = LowRankLinear(d_model, n_heads * self.head_dim, rank)
-        
+        self.qkv_linear = LowRankLinear(d_model, 3 * d_model, rank)
         self.out = LowRankLinear(d_model, d_model, rank)
         self.dropout = nn.Dropout(dropout)
         
-        self.scale = 1.0 / math.sqrt(self.head_dim)
+        # Low-rank factors for attention
+        self.u_attn = nn.Parameter(torch.randn(n_heads, self.head_dim, rank, dtype=torch.float16) / (self.head_dim ** 0.5))
+        self.v_attn = nn.Parameter(torch.randn(n_heads, rank, self.head_dim, dtype=torch.float16) / (rank ** 0.5))
+        
+        self.scale = 1.0 / math.sqrt(rank)
     
     def forward(self, x, mask=None):
         bs, seq_len, _ = x.size()
         
-        # Ensure input is float16
-        x = x.to(torch.float16)
+        qkv = self.qkv_linear(x).chunk(3, dim=-1)
+        q, k, v = map(lambda t: t.view(bs, seq_len, self.n_heads, self.head_dim).transpose(1, 2), qkv)
         
-        # Low-rank projections
-        q = self.q_linear(x).view(bs, seq_len, self.n_heads, self.head_dim)
-        k = self.k_linear(x).view(bs, seq_len, self.n_heads, self.head_dim)
-        v = self.v_linear(x).view(bs, seq_len, self.n_heads, self.head_dim)
+        # Low-rank attention computation
+        q_low = torch.matmul(q, self.u_attn)  # Shape: [bs, n_heads, seq_len, rank]
+        k_low = torch.matmul(k, self.u_attn)  # Shape: [bs, n_heads, seq_len, rank]
         
-        # Transpose for attention computation
-        q = q.transpose(1, 2)
-        k = k.transpose(1, 2)
-        v = v.transpose(1, 2)
-        
-        # Scaled dot-product attention
-        scores = torch.matmul(q, k.transpose(-2, -1)) * self.scale
+        scores = torch.matmul(q_low, k_low.transpose(-2, -1)) * self.scale
         
         if mask is not None:
-            mask = mask.to(torch.float16)
             scores = scores.masked_fill(mask.unsqueeze(1).unsqueeze(2) == 0, float('-inf'))
         
         attn = F.softmax(scores, dim=-1)
         attn = self.dropout(attn)
         
-        context = torch.matmul(attn, v)
+        v_low = torch.matmul(v, self.u_attn)  # Shape: [bs, n_heads, seq_len, rank]
+        context_low = torch.matmul(attn, v_low)  # Shape: [bs, n_heads, seq_len, rank]
+        context = torch.matmul(context_low, self.v_attn)  # Shape: [bs, n_heads, seq_len, head_dim]
         
-        # Reshape and project output
         context = context.transpose(1, 2).contiguous().view(bs, seq_len, self.d_model)
         output = self.out(context)
         
         return output
-
+    
 class TransformerBlock(nn.Module):
     def __init__(self, d_model, n_heads, rank, d_ff, dropout=0.1):
         super().__init__()
@@ -86,10 +78,8 @@ class TransformerBlock(nn.Module):
         self.dropout = nn.Dropout(dropout)
         
     def forward(self, x, mask=None):
-        x2 = self.norm1(x)
-        x = x + self.dropout(self.attention(x2, mask))
-        x2 = self.norm2(x)
-        x = x + self.dropout(self.feed_forward(x2))
+        x = x + self.dropout(self.attention(self.norm1(x), mask))
+        x = x + self.dropout(self.feed_forward(self.norm2(x)))
         return x
 
 class PositionalEncoding(nn.Module):
@@ -120,9 +110,7 @@ class LowRankTransformer(nn.Module):
         self.dropout = nn.Dropout(dropout)
         
     def forward(self, x, mask=None):
-        x = self.embedding(x)
-        x = self.pos_encoding(x)
-        x = self.dropout(x)
+        x = self.dropout(self.pos_encoding(self.embedding(x)))
         
         for layer in self.layers:
             x = layer(x, mask)
@@ -130,16 +118,16 @@ class LowRankTransformer(nn.Module):
         return self.fc_out(x)
 
 # Hyperparameters
-VOCAB_SIZE = 30000
+VOCAB_SIZE = 30_000
 D_MODEL = 4096
 N_HEADS = 32
-RANK = 32
+RANK = 256
 N_LAYERS = 32
 D_FF = 1024
 MAX_SEQ_LEN = 256
 BATCH_SIZE = 8
 LEARNING_RATE = 1e-4
-NUM_EPOCHS = 2
+NUM_EPOCHS = 1
 
 # Load dataset
 dataset = load_dataset("roneneldan/TinyStories")
