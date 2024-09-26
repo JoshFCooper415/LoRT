@@ -7,6 +7,11 @@ from transformers import AutoTokenizer
 import math
 from tqdm import tqdm
 import flora_opt
+import json
+import os
+from scipy.optimize import curve_fit
+import matplotlib.pyplot as plt
+import numpy as np
 
 class LowRankLinear(nn.Module):
     def __init__(self, in_features, out_features, rank):
@@ -16,7 +21,6 @@ class LowRankLinear(nn.Module):
         self.b = nn.Parameter(torch.zeros(out_features, dtype=torch.float16))
    
     def forward(self, x):
-        # Ensure x is in float16
         x = x.to(torch.float16)
         return torch.matmul(torch.matmul(x, self.u), self.v) + self.b
 
@@ -31,7 +35,6 @@ class LowRankAttention(nn.Module):
         self.out = LowRankLinear(d_model, d_model, rank)
         self.dropout = nn.Dropout(dropout)
         
-        # Low-rank factors for attention
         self.u_attn = nn.Parameter(torch.randn(n_heads, self.head_dim, rank, dtype=torch.float16) / (self.head_dim ** 0.5))
         self.v_attn = nn.Parameter(torch.randn(n_heads, rank, self.head_dim, dtype=torch.float16) / (rank ** 0.5))
         
@@ -43,9 +46,8 @@ class LowRankAttention(nn.Module):
         qkv = self.qkv_linear(x).chunk(3, dim=-1)
         q, k, v = map(lambda t: t.view(bs, seq_len, self.n_heads, self.head_dim).transpose(1, 2), qkv)
         
-        # Low-rank attention computation
-        q_low = torch.matmul(q, self.u_attn)  # Shape: [bs, n_heads, seq_len, rank]
-        k_low = torch.matmul(k, self.u_attn)  # Shape: [bs, n_heads, seq_len, rank]
+        q_low = torch.matmul(q, self.u_attn)
+        k_low = torch.matmul(k, self.u_attn)
         
         scores = torch.matmul(q_low, k_low.transpose(-2, -1)) * self.scale
         
@@ -55,15 +57,15 @@ class LowRankAttention(nn.Module):
         attn = F.softmax(scores, dim=-1)
         attn = self.dropout(attn)
         
-        v_low = torch.matmul(v, self.u_attn)  # Shape: [bs, n_heads, seq_len, rank]
-        context_low = torch.matmul(attn, v_low)  # Shape: [bs, n_heads, seq_len, rank]
-        context = torch.matmul(context_low, self.v_attn)  # Shape: [bs, n_heads, seq_len, head_dim]
+        v_low = torch.matmul(v, self.u_attn)
+        context_low = torch.matmul(attn, v_low)
+        context = torch.matmul(context_low, self.v_attn)
         
         context = context.transpose(1, 2).contiguous().view(bs, seq_len, self.d_model)
         output = self.out(context)
         
         return output
-    
+
 class TransformerBlock(nn.Module):
     def __init__(self, d_model, n_heads, rank, d_ff, dropout=0.1):
         super().__init__()
@@ -117,30 +119,12 @@ class LowRankTransformer(nn.Module):
         
         return self.fc_out(x)
 
-# Hyperparameters
-VOCAB_SIZE = 20_000
-D_MODEL = 128
-N_HEADS = 4
-RANK = 64
-N_LAYERS = 4
-D_FF = 128
-MAX_SEQ_LEN = 128
-BATCH_SIZE = 256
-LEARNING_RATE = 1e-4
-NUM_EPOCHS = 1
-
-# Load dataset
-dataset = load_dataset("roneneldan/TinyStories")
-
 # Tokenizer
 tokenizer = AutoTokenizer.from_pretrained("gpt2")
 tokenizer.pad_token = tokenizer.eos_token
 
 def tokenize_function(examples):
-    return tokenizer(examples["text"], truncation=True, max_length=MAX_SEQ_LEN, padding=False)
-
-# Tokenize the dataset
-tokenized_datasets = dataset.map(tokenize_function, batched=True, remove_columns=dataset["train"].column_names)
+    return tokenizer(examples["text"], truncation=True, max_length=128, padding=False)
 
 class TinyStoriesDataset(Dataset):
     def __init__(self, tokenized_data):
@@ -152,27 +136,24 @@ class TinyStoriesDataset(Dataset):
     def __getitem__(self, idx):
         return torch.tensor(self.data[idx]["input_ids"], dtype=torch.long)
 
-train_dataset = TinyStoriesDataset(tokenized_datasets["train"])
-val_dataset = TinyStoriesDataset(tokenized_datasets["validation"])
-
-# Collate function for DataLoader
 def collate_fn(batch):
-    # Pad sequences in the batch to the same length
     padded_batch = nn.utils.rnn.pad_sequence(batch, batch_first=True, padding_value=tokenizer.pad_token_id)
     return padded_batch
 
-# Create DataLoaders
-train_dataloader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)
-val_dataloader = DataLoader(val_dataset, batch_size=BATCH_SIZE, collate_fn=collate_fn)
+def create_model_config(d_model, n_heads, rank, n_layers, d_ff):
+    return {
+        "d_model": d_model,
+        "n_heads": n_heads,
+        "rank": rank,
+        "n_layers": n_layers,
+        "d_ff": d_ff
+    }
 
-# Initialize model, loss function, and optimizer
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = LowRankTransformer(len(tokenizer), D_MODEL, N_HEADS, RANK, N_LAYERS, D_FF).to(device)
-criterion = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id, reduction='none')
-optimizer = flora_opt.Flora(model.parameters(), lr=LEARNING_RATE)
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-# Training function
 def train(model, train_dataloader, val_dataloader, criterion, optimizer, num_epochs):
+    device = next(model.parameters()).device
     model.train()
     for epoch in range(num_epochs):
         total_loss = 0.
@@ -181,21 +162,17 @@ def train(model, train_dataloader, val_dataloader, criterion, optimizer, num_epo
         for batch in progress_bar:
             input_ids = batch.to(device)
             
-            # Create causal mask
             seq_len = input_ids.size(1)
             causal_mask = torch.tril(torch.ones((seq_len, seq_len), device=device)).unsqueeze(0)
             
             optimizer.zero_grad()
             output = model(input_ids, causal_mask)
             
-            # Shift the targets for next token prediction
             shifted_output = output[:, :-1, :].contiguous()
             shifted_targets = input_ids[:, 1:].contiguous()
             
-            # Create a mask for non-padding tokens
             non_pad_mask = (shifted_targets != tokenizer.pad_token_id).float()
             
-            # Calculate loss only on non-padding tokens
             loss = criterion(shifted_output.view(-1, len(tokenizer)), shifted_targets.view(-1))
             loss = (loss * non_pad_mask.view(-1)).sum() / non_pad_mask.sum()
             
@@ -211,8 +188,8 @@ def train(model, train_dataloader, val_dataloader, criterion, optimizer, num_epo
         val_loss = evaluate(model, val_dataloader, criterion)
         print(f'Epoch {epoch+1}/{num_epochs} | Train Loss: {avg_train_loss:.4f} | Val Loss: {val_loss:.4f}')
 
-# Evaluation function
 def evaluate(model, dataloader, criterion):
+    device = next(model.parameters()).device
     model.eval()
     total_loss = 0.
     total_tokens = 0
@@ -238,42 +215,84 @@ def evaluate(model, dataloader, criterion):
     
     return total_loss / total_tokens
 
-# Parameter counting functions
-def count_low_rank_parameters(model):
-    total_params = 0
-    for module in model.modules():
-        if isinstance(module, LowRankLinear):
-            total_params += module.u.numel() + module.v.numel() + module.b.numel()
-        elif isinstance(module, nn.Embedding) or isinstance(module, nn.LayerNorm):
-            total_params += sum(p.numel() for p in module.parameters() if p.requires_grad)
-    return total_params
+def train_and_evaluate(model_config, dataset_size, num_epochs, batch_size, learning_rate):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = LowRankTransformer(len(tokenizer), **model_config).to(device)
+    criterion = nn.CrossEntropyLoss(ignore_index=tokenizer.pad_token_id, reduction='none')
+    optimizer = flora_opt.Flora(model.parameters(), lr=learning_rate)
 
-def count_full_rank_equivalent(model):
-    total_params = 0
-    for module in model.modules():
-        if isinstance(module, LowRankLinear):
-            total_params += module.u.size(0) * module.v.size(1) + module.b.numel()
-        elif isinstance(module, nn.Embedding) or isinstance(module, nn.LayerNorm):
-            total_params += sum(p.numel() for p in module.parameters() if p.requires_grad)
-    return total_params
+    full_dataset = load_dataset("roneneldan/TinyStories")
+    train_dataset = full_dataset["train"].select(range(dataset_size))
+    val_dataset = full_dataset["validation"].select(range(min(10000, len(full_dataset["validation"]))))
 
-print(f"Using device: {device}")
+    tokenized_train = train_dataset.map(tokenize_function, batched=True, remove_columns=train_dataset.column_names)
+    tokenized_val = val_dataset.map(tokenize_function, batched=True, remove_columns=val_dataset.column_names)
 
-# Train the model
-train(model, train_dataloader, val_dataloader, criterion, optimizer, NUM_EPOCHS)
+    train_dataloader = DataLoader(TinyStoriesDataset(tokenized_train), batch_size=batch_size, shuffle=True, collate_fn=collate_fn)
+    val_dataloader = DataLoader(TinyStoriesDataset(tokenized_val), batch_size=batch_size, collate_fn=collate_fn)
 
-# Evaluate on validation set
-val_loss = evaluate(model, val_dataloader, criterion)
-print(f'Final Validation loss: {val_loss:.4f}')
+    train(model, train_dataloader, val_dataloader, criterion, optimizer, num_epochs)
 
-# Save the model
-torch.save(model.state_dict(), 'tiny_stories_low_rank_transformer.pth')
-print("Model saved as 'tiny_stories_low_rank_transformer.pth'")
+    val_loss = evaluate(model, val_dataloader, criterion)
+    val_perplexity = math.exp(val_loss)
 
-# Calculate and print the number of parameters
-low_rank_params = count_low_rank_parameters(model)
-full_rank_equivalent = count_full_rank_equivalent(model)
+    return {
+        "model_config": model_config,
+        "dataset_size": dataset_size,
+        "num_epochs": num_epochs,
+        "batch_size": batch_size,
+        "learning_rate": learning_rate,
+        "num_parameters": count_parameters(model),
+        "val_loss": val_loss,
+        "val_perplexity": val_perplexity
+    }
+def run_rank_experiments(base_config, ranks, dataset_sizes, num_epochs, batch_size, learning_rate):
+    results = []
+    for rank in ranks:
+        config = base_config.copy()
+        config['rank'] = rank
+        for size in dataset_sizes:
+            print(f"Training model with rank {rank} and dataset size {size}")
+            result = train_and_evaluate(config, size, num_epochs, batch_size, learning_rate)
+            results.append(result)
+            
+            with open('rank_results.json', 'w') as f:
+                json.dump(results, f, indent=2)
 
-print(f"Number of parameters in the low-rank model: {low_rank_params:,}")
-print(f"Equivalent number of parameters in a full-rank model: {full_rank_equivalent:,}")
-print(f"Parameter reduction: {(1 - low_rank_params / full_rank_equivalent) * 100:.2f}%")
+    return results
+
+def plot_rank_analysis(results):
+    plt.figure(figsize=(10, 6))
+    
+    dataset_sizes = sorted(set(r['dataset_size'] for r in results))
+    ranks = sorted(set(r['model_config']['rank'] for r in results))
+    
+    for size in dataset_sizes:
+        perplexities = [next(r['val_perplexity'] for r in results if r['dataset_size'] == size and r['model_config']['rank'] == rank) for rank in ranks]
+        plt.plot(ranks, perplexities, marker='o', label=f'Dataset size: {size}')
+    
+    plt.xscale('log')
+    plt.yscale('log')
+    plt.xlabel('Rank')
+    plt.ylabel('Validation Perplexity')
+    plt.title('Effect of Rank on Model Performance')
+    plt.legend()
+    plt.grid(True)
+    plt.savefig('rank_analysis.png')
+    plt.close()
+
+if __name__ == "__main__":
+    base_config = create_model_config(256, 8, None, 6, 256)  # rank will be set in the experiment loop
+    ranks = [32, 64, 128, 256]
+    dataset_sizes = [10000, 50000, 100000, 500000]
+    num_epochs = 1
+    batch_size = 256
+    learning_rate = 1e-4
+
+    print("Starting rank analysis...")
+    results = run_rank_experiments(base_config, ranks, dataset_sizes, num_epochs, batch_size, learning_rate)
+
+    print("Plotting rank analysis...")
+    plot_rank_analysis(results)
+
+    print("Rank analysis complete. Results saved in 'rank_results.json' and plot saved as 'rank_analysis.png'.")

@@ -1,0 +1,206 @@
+[
+  {
+    "model_config": {
+      "d_model": 256,
+      "n_heads": 8,
+      "num_experts": 8,
+      "rank": 32,
+      "n_layers": 6,
+      "d_ff": 256
+    },
+    "dataset_size": 10000,
+    "num_epochs": 1,
+    "batch_size": 128,
+    "learning_rate": 0.0001,
+    "num_parameters": 16547745,
+    "val_loss": 12.904427750400481,
+    "val_perplexity": 402088.6036483294
+  },
+  {
+    "model_config": {
+      "d_model": 256,
+      "n_heads": 8,
+      "num_experts": 8,
+      "rank": 32,
+      "n_layers": 6,
+      "d_ff": 256
+    },
+    "dataset_size": 50000,
+    "num_epochs": 1,
+    "batch_size": 128,
+    "learning_rate": 0.0001,
+    "num_parameters": 16547745,
+    "val_loss": 11.696692414688698,
+    "val_perplexity": 120173.57256099918
+  },
+  {
+    "model_config": {
+      "d_model": 256,
+      "n_heads": 8,
+      "num_experts": 8,
+      "rank": 32,
+      "n_layers": 6,
+      "d_ff": 256
+    },
+    "dataset_size": 100000,
+    "num_epochs": 1,
+    "batch_size": 128,
+    "learning_rate": 0.0001,
+    "num_parameters": 16547745,
+    "val_loss": 10.964723441357851,
+    "val_perplexity": 57798.80856338845
+  },
+  {
+    "model_config": {
+      "d_model": 256,
+      "n_heads": 8,
+      "num_experts": 8,
+      "rank": 32,
+      "n_layers": 6,
+      "d_ff": 256
+    },
+    "dataset_size": 500000,
+    "num_epochs": 1,
+    "batch_size": 128,
+    "learning_rate": 0.0001,
+    "num_parameters": 16547745,
+    "val_loss": 8.54218161610977,
+    "val_perplexity": 5126.516261281866
+  },
+  {
+    "model_config": {
+      "d_model": 256,
+      "n_heads": 8,
+      "num_experts": 8,
+      "rank": 64,
+      "n_layers": 6,
+      "d_ff": 256
+    },
+    "dataset_size": 10000,
+    "num_epochs": 1,
+    "batch_size": 128,
+    "learning_rate": 0.0001,
+    "num_parameters": 20130241,
+    "val_loss": 13.009662525761364,
+    "val_perplexity": 446708.94231823465
+  },
+  {
+    "model_config": {
+      "d_model": 256,
+      "n_heads": 8,
+      "num_experts": 8,
+      "rank": 64,
+      "n_layers": 6,
+      "d_ff": 256
+    },
+    "dataset_size": 50000,
+    "num_epochs": 1,
+    "batch_size": 128,
+    "learning_rate": 0.0001,
+    "num_parameters": 20130241,
+    "val_loss": 11.396724276823155,
+    "val_perplexity": 89029.60882578105
+  },
+  {
+    "model_config": {
+      "d_model": 256,
+      "n_heads": 8,
+      "num_experts": 8,
+      "rank": 64,
+      "n_layers": 6,
+      "d_ff": 256
+    },
+    "dataset_size": 100000,
+    "num_epochs": 1,
+    "batch_size": 128,
+    "learning_rate": 0.0001,
+    "num_parameters": 20130241,
+    "val_loss": 10.32161830802764,
+    "val_perplexity": 30382.38589213294
+  },
+  {
+    "model_config": {
+      "d_model": 256,
+      "n_heads": 8,
+      "num_experts": 8,
+      "rank": 64,
+      "n_layers": 6,
+      "d_ff": 256
+    },
+    "dataset_size": 500000,
+    "num_epochs": 1,
+    "batch_size": 128,
+    "learning_rate": 0.0001,
+    "num_parameters": 20130241,
+    "val_loss": 7.089875663465521,
+    "val_perplexity": 1199.758617507866
+  },
+  {
+    "model_config": {
+      "d_model": 256,
+      "n_heads": 8,
+      "num_experts": 8,
+      "rank": 128,
+      "n_layers": 6,
+      "d_ff": 256
+    },
+    "dataset_size": 10000,
+    "num_epochs": 1,
+    "batch_size": 128,
+    "learning_rate": 0.0001,
+    "num_parameters": 27295233,
+    "val_loss": 12.910038925966187,
+    "val_perplexity": 404351.13519085484
+  },
+  {
+    "model_config": {
+      "d_model": 256,
+      "n_heads": 8,
+      "num_experts": 8,
+      "rank": 128,
+      "n_layers": 6,
+      "d_ff": 256
+    },
+    "dataset_size": 50000,
+    "num_epochs": 1,
+    "batch_size": 128,
+    "learning_rate": 0.0001,
+    "num_parameters": 27295233,
+    "val_loss": 11.095610341542697,
+    "val_perplexity": 65881.32797308791
+  },
+  {
+    "model_config": {
+      "d_model": 256,
+      "n_heads": 8,
+      "num_experts": 8,
+      "rank": 128,
+      "n_layers": 6,
+      "d_ff": 256
+    },
+    "dataset_size": 100000,
+    "num_epochs": 1,
+    "batch_size": 128,
+    "learning_rate": 0.0001,
+    "num_parameters": 27295233,
+    "val_loss": 9.459586769726043,
+    "val_perplexity": 12830.581367624305
+  },
+  {
+    "model_config": {
+      "d_model": 256,
+      "n_heads": 8,
+      "num_experts": 8,
+      "rank": 128,
+      "n_layers": 6,
+      "d_ff": 256
+    },
+    "dataset_size": 500000,
+    "num_epochs": 1,
+    "batch_size": 128,
+    "learning_rate": 0.0001,
+    "num_parameters": 27295233,
+    "val_loss": 5.771370452020128,
+    "val_perplexity": 320.9773153753093
+  }
+]
